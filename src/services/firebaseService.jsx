@@ -1,15 +1,18 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, setDoc, addDoc, getDoc, updateDoc, onSnapshot, deleteDoc, getDocs } from 'firebase/firestore';
+import { 
+  getFirestore, collection, doc, setDoc, addDoc, getDoc, 
+  updateDoc, onSnapshot, deleteDoc, getDocs 
+} from 'firebase/firestore';
 
 const firebaseConfig = {
-    apiKey: "AIzaSyAoyid-IeEEJriJbvHjtF1ptWUmcDH0gmQ",
-    authDomain: "crdt-03.firebaseapp.com",
-    projectId: "crdt-03",
-    storageBucket: "crdt-03.firebasestorage.app",
-    messagingSenderId: "4718582918",
-    appId: "1:4718582918:web:3da3b38e77baf6c1630507",
-    measurementId: "G-VRDD11VLEB"
-  };
+    apiKey: process.env.REACT_APP_API_KEY,
+    authDomain: process.env.REACT_APP_AUTH_DOMAIN,
+    projectId: process.env.REACT_APP_PROJECT_ID,
+    storageBucket: process.env.REACT_APP_STORAGE_BUCKET,
+    messagingSenderId: process.env.REACT_APP_MESSAGING_SENDER_ID,
+    appId: process.env.REACT_APP_APP_ID,
+    measurementId: process.env.REACT_APP_MEASUREMENT_ID
+};
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
