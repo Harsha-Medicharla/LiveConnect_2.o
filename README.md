@@ -1,70 +1,55 @@
-# Getting Started with Create React App
+LiveConnect WebSocket Signaling Update
+This update replaces Firebase Firestore signaling with a custom WebSocket server for better performance and more control.
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Key Changes
+WebSocket Signaling: Replaced Firebase Firestore with a dedicated WebSocket server
+Reduced Latency: Direct communication reduces signaling delay
+Enhanced Control: Full control over the signaling protocol
+Simplified Architecture: No more Firebase dependencies for signaling
+Setup Instructions
+1. Set up the WebSocket Server
+Install Dependencies
+bash
+cd server
+npm install
+Configure Environment Variables
+Create a .env file in the server directory based on the .env.example template:
 
-## Available Scripts
+bash
+cp .env.example .env
+Edit the .env file with your preferred settings.
 
-In the project directory, you can run:
+Start the Server
+bash
+npm start
+For development with auto-restart:
 
-### `npm start`
+bash
+npm run dev
+2. Configure the Client
+Update Environment Variables
+Create a .env file in the root directory based on the .env.example template:
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+bash
+cp .env.example .env
+Edit the .env file:
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
-
-### `npm test`
-
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
-
-### `npm run build`
-
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
-
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
-
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+You can leave REACT_APP_WS_SERVER blank to connect to the same host as the frontend
+If hosting the WebSocket server separately, set REACT_APP_WS_SERVER to your server URL
+Build and Run
+bash
+npm install
+npm start
+Deployment Options
+Option 1: Single Server (Frontend + WebSocket)
+Deploy the React application to your hosting service
+Run the WebSocket server on the same machine (handle via process manager like PM2)
+Option 2: Separate Servers
+Deploy the React application to Firebase Hosting (or any other static hosting)
+Deploy the WebSocket server to a separate VPS or cloud service
+Set REACT_APP_WS_SERVER to point to your WebSocket server URL
+Production Considerations
+SSL/TLS: For production, ensure both the website and WebSocket server use HTTPS/WSS
+Load Balancing: For high-traffic scenarios, consider load balancing across multiple WebSocket servers
+Authentication: Add user authentication for secure room access
+Scaling: Consider adding Redis for state management across multiple server instances
