@@ -8,8 +8,10 @@ import CloseIcon from '@mui/icons-material/Close';
 import Typography from '@mui/material/Typography';
 import Grid from '@mui/material/Grid';
 import Paper from '@mui/material/Paper';
+import Snackbar from '@mui/material/Snackbar';
+import Alert from '@mui/material/Alert';
 
-import { firestore, servers } from '../services/firebaseService';
+import websocketService, { servers } from '../services/websocketService';
 import JoinRoomDialog from './JoinRoomDialog';
 import VideoStream from './VideoStream';
 
@@ -45,10 +47,39 @@ function VideoRoom() {
   const [roomId, setRoomId] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [isCreator, setIsCreator] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState('info');
 
   // Enable/disable buttons based on state
   const cameraEnabled = localStream !== null;
   const roomConnected = roomId !== null;
+
+  // Initialize WebSocket connection
+  useEffect(() => {
+    const initWebSocket = async () => {
+      try {
+        await websocketService.connect();
+      } catch (error) {
+        console.error('Failed to connect to WebSocket server:', error);
+        showSnackbar('Failed to connect to signaling server', 'error');
+      }
+    };
+
+    initWebSocket();
+
+    return () => {
+      websocketService.disconnect();
+    };
+  }, []);
+
+  // Helper function to show snackbar notifications
+  const showSnackbar = (message, severity = 'info') => {
+    setSnackbarMessage(message);
+    setSnackbarSeverity(severity);
+    setSnackbarOpen(true);
+  };
 
   // Clean up function to handle hangup
   const cleanUp = async () => {
@@ -67,23 +98,9 @@ function VideoRoom() {
       setPeerConnection(null);
     }
 
-    // Delete room on hangup
+    // Clean up room resources
     if (roomId) {
-      const roomRef = firestore.collection('rooms').doc(roomId);
-      
-      // Delete all candidates
-      const calleeCandidates = await roomRef.collection('calleeCandidates').get();
-      calleeCandidates.forEach(async candidate => {
-        await candidate.ref.delete();
-      });
-      
-      const callerCandidates = await roomRef.collection('callerCandidates').get();
-      callerCandidates.forEach(async candidate => {
-        await candidate.ref.delete();
-      });
-      
-      // Delete the room
-      await roomRef.delete();
+      await websocketService.leaveRoom(roomId);
       setRoomId(null);
     }
   };
@@ -96,6 +113,11 @@ function VideoRoom() {
 
     pc.addEventListener('connectionstatechange', () => {
       console.log(`Connection state change: ${pc.connectionState}`);
+      if (pc.connectionState === 'connected') {
+        showSnackbar('Peer connection established!', 'success');
+      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        showSnackbar('Peer connection lost', 'warning');
+      }
     });
 
     pc.addEventListener('signalingstatechange', () => {
@@ -117,14 +139,19 @@ function VideoRoom() {
       
       setLocalStream(stream);
       setRemoteStream(new MediaStream());
+      showSnackbar('Camera and microphone are ready', 'success');
     } catch (error) {
       console.error('Error opening media devices:', error);
+      showSnackbar('Failed to access camera or microphone', 'error');
     }
   };
 
   // Create a new room
   const createRoom = async () => {
     try {
+      setIsConnecting(true);
+      showSnackbar('Creating room...', 'info');
+      
       // Create a new peer connection
       const pc = new RTCPeerConnection(servers);
       setPeerConnection(pc);
@@ -135,35 +162,6 @@ function VideoRoom() {
         pc.addTrack(track, localStream);
       });
 
-      // Create a new room in Firestore
-      const roomRef = await firestore.collection('rooms').doc();
-      
-      // Set up ICE candidate collection
-      const callerCandidatesCollection = roomRef.collection('callerCandidates');
-      pc.addEventListener('icecandidate', event => {
-        if (!event.candidate) {
-          console.log('Got final candidate!');
-          return;
-        }
-        console.log('Got candidate:', event.candidate);
-        callerCandidatesCollection.add(event.candidate.toJSON());
-      });
-
-      // Create offer
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      
-      const roomWithOffer = {
-        offer: {
-          type: offer.type,
-          sdp: offer.sdp,
-        },
-      };
-      
-      await roomRef.set(roomWithOffer);
-      setRoomId(roomRef.id);
-      setIsCreator(true);
-      
       // Listen for remote tracks
       pc.addEventListener('track', event => {
         console.log('Got remote track:', event.streams[0]);
@@ -173,29 +171,48 @@ function VideoRoom() {
         });
       });
 
-      // Listen for remote session description
-      roomRef.onSnapshot(async snapshot => {
-        const data = snapshot.data();
-        if (!pc.currentRemoteDescription && data && data.answer) {
-          console.log('Got remote description:', data.answer);
-          const rtcSessionDescription = new RTCSessionDescription(data.answer);
-          await pc.setRemoteDescription(rtcSessionDescription);
+      // Handle ICE candidates
+      pc.addEventListener('icecandidate', event => {
+        if (!event.candidate) {
+          console.log('Got final candidate!');
+          return;
         }
+        console.log('Got candidate:', event.candidate);
+        websocketService.sendIceCandidate(roomId, event.candidate.toJSON(), true);
+      });
+
+      // Create offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      
+      // Create room on signaling server
+      const newRoomId = await websocketService.createRoom({
+        type: offer.type,
+        sdp: offer.sdp,
+      });
+      
+      setRoomId(newRoomId);
+      setIsCreator(true);
+      showSnackbar(`Room created: ${newRoomId}`, 'success');
+      
+      // Listen for remote answer
+      websocketService.onRoomAnswer(newRoomId, async (answer) => {
+        console.log('Got remote description:', answer);
+        const rtcSessionDescription = new RTCSessionDescription(answer);
+        await pc.setRemoteDescription(rtcSessionDescription);
       });
 
       // Listen for remote ICE candidates
-      roomRef.collection('calleeCandidates').onSnapshot(snapshot => {
-        snapshot.docChanges().forEach(async change => {
-          if (change.type === 'added') {
-            let data = change.doc.data();
-            console.log(`Got new remote ICE candidate: ${JSON.stringify(data)}`);
-            await pc.addIceCandidate(new RTCIceCandidate(data));
-          }
-        });
+      websocketService.onIceCandidate(newRoomId, async (candidate) => {
+        console.log(`Got new remote ICE candidate: ${JSON.stringify(candidate)}`);
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
       });
       
     } catch (error) {
       console.error('Error creating room:', error);
+      showSnackbar('Failed to create room', 'error');
+    } finally {
+      setIsConnecting(false);
     }
   };
 
@@ -203,14 +220,8 @@ function VideoRoom() {
   const joinRoom = async (roomIdToJoin) => {
     try {
       setDialogOpen(false);
-      
-      const roomRef = firestore.collection('rooms').doc(roomIdToJoin);
-      const roomSnapshot = await roomRef.get();
-      
-      if (!roomSnapshot.exists) {
-        console.log('Room does not exist!');
-        return;
-      }
+      setIsConnecting(true);
+      showSnackbar('Joining room...', 'info');
       
       // Create a new peer connection
       const pc = new RTCPeerConnection(servers);
@@ -222,17 +233,6 @@ function VideoRoom() {
         pc.addTrack(track, localStream);
       });
       
-      // Set up ICE candidate collection
-      const calleeCandidatesCollection = roomRef.collection('calleeCandidates');
-      pc.addEventListener('icecandidate', event => {
-        if (!event.candidate) {
-          console.log('Got final candidate!');
-          return;
-        }
-        console.log('Got candidate:', event.candidate);
-        calleeCandidatesCollection.add(event.candidate.toJSON());
-      });
-      
       // Listen for remote tracks
       pc.addEventListener('track', event => {
         console.log('Got remote track:', event.streams[0]);
@@ -242,39 +242,50 @@ function VideoRoom() {
         });
       });
       
+      // Handle ICE candidates
+      pc.addEventListener('icecandidate', event => {
+        if (!event.candidate) {
+          console.log('Got final candidate!');
+          return;
+        }
+        console.log('Got candidate:', event.candidate);
+        websocketService.sendIceCandidate(roomIdToJoin, event.candidate.toJSON(), false);
+      });
+
       // Get remote description (offer)
-      const offer = roomSnapshot.data().offer;
+      const offer = await websocketService.getRoomOffer(roomIdToJoin);
+      
+      if (!offer) {
+        throw new Error('Room not found');
+      }
+      
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       
       // Create answer
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       
-      const roomWithAnswer = {
-        answer: {
-          type: answer.type,
-          sdp: answer.sdp,
-        },
-      };
-      
-      await roomRef.update(roomWithAnswer);
+      // Send answer to signaling server
+      await websocketService.joinRoom(roomIdToJoin, {
+        type: answer.type,
+        sdp: answer.sdp,
+      });
       
       // Listen for remote ICE candidates
-      roomRef.collection('callerCandidates').onSnapshot(snapshot => {
-        snapshot.docChanges().forEach(async change => {
-          if (change.type === 'added') {
-            let data = change.doc.data();
-            console.log(`Got new remote ICE candidate: ${JSON.stringify(data)}`);
-            await pc.addIceCandidate(new RTCIceCandidate(data));
-          }
-        });
+      websocketService.onIceCandidate(roomIdToJoin, async (candidate) => {
+        console.log(`Got new remote ICE candidate: ${JSON.stringify(candidate)}`);
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
       });
       
       setRoomId(roomIdToJoin);
       setIsCreator(false);
+      showSnackbar(`Joined room: ${roomIdToJoin}`, 'success');
       
     } catch (error) {
       console.error('Error joining room:', error);
+      showSnackbar('Failed to join room', 'error');
+    } finally {
+      setIsConnecting(false);
     }
   };
 
@@ -304,7 +315,7 @@ function VideoRoom() {
             color="primary"
             startIcon={<GroupAddIcon />}
             onClick={createRoom}
-            disabled={!cameraEnabled || roomConnected}
+            disabled={!cameraEnabled || roomConnected || isConnecting}
           >
             Create room
           </StyledButton>
@@ -314,7 +325,7 @@ function VideoRoom() {
             color="primary"
             startIcon={<GroupIcon />}
             onClick={() => setDialogOpen(true)}
-            disabled={!cameraEnabled || roomConnected}
+            disabled={!cameraEnabled || roomConnected || isConnecting}
           >
             Join room
           </StyledButton>
@@ -340,6 +351,7 @@ function VideoRoom() {
         
         <Grid item xs={12} component={VideosContainer}>
           <VideoWrapper>
+            <Typography variant="subtitle2" gutterBottom>Remote Stream</Typography>
             <VideoStream
               stream={remoteStream}
               muted={false}
@@ -348,6 +360,7 @@ function VideoRoom() {
           </VideoWrapper>
           
           <VideoWrapper>
+            <Typography variant="subtitle2" gutterBottom>Your Stream</Typography>
             <VideoStream
               stream={localStream}
               muted={true}
@@ -362,6 +375,20 @@ function VideoRoom() {
         onClose={() => setDialogOpen(false)}
         onJoin={joinRoom}
       />
+      
+      <Snackbar 
+        open={snackbarOpen} 
+        autoHideDuration={6000} 
+        onClose={() => setSnackbarOpen(false)}
+      >
+        <Alert 
+          onClose={() => setSnackbarOpen(false)} 
+          severity={snackbarSeverity}
+          sx={{ width: '100%' }}
+        >
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
     </Root>
   );
 }
